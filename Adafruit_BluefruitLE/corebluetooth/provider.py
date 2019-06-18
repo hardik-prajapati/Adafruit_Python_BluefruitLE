@@ -28,6 +28,7 @@ import sys
 import subprocess
 import threading
 import time
+import libdispatch
 
 import objc
 from PyObjCTools import AppHelper
@@ -38,10 +39,10 @@ from ..platform import get_provider
 from .metadata import CoreBluetoothMetadata
 from .objc_helpers import uuid_to_cbuuid
 
-
 # Load CoreBluetooth bundle.
 objc.loadBundle("CoreBluetooth", globals(),
-    bundle_path=objc.pathForFramework(u'/System/Library/Frameworks/IOBluetooth.framework/Versions/A/Frameworks/CoreBluetooth.framework'))
+                bundle_path=objc.pathForFramework(
+                    u'/System/Library/Frameworks/IOBluetooth.framework/Versions/A/Frameworks/CoreBluetooth.framework'))
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +68,13 @@ def descriptor_list():
 class CentralDelegate(object):
     """Internal class to handle asyncronous BLE events from the operating system.
     """
+
     # Note that this class will be used by multiple threads (the main loop
     # thread that will receive async BLE events, and the secondary thread
     # that will receive requests from user code) so access to internal state
+
+    def __init__(self, log_level):
+        logger.setLevel(log_level)
 
     def centralManagerDidUpdateState_(self, manager):
         """Called when the BLE adapter is powered on and ready to scan/connect
@@ -92,10 +97,14 @@ class CentralDelegate(object):
         if device is None:
             device = device_list().add(peripheral, CoreBluetoothDevice(peripheral))
         device._update_advertised(data)
+        adv_callback = get_provider()._adapter._adv_callbabk
+
+        if adv_callback is not None:
+            adv_callback(device)
 
     def centralManager_didConnectPeripheral_(self, manager, peripheral):
         """Called when a device is connected."""
-        logger.debug('centralManager_didConnectPeripheral called')
+        logger.info('centralManager_didConnectPeripheral called')
         # Setup peripheral delegate and kick off service discovery.  For now just
         # assume all services need to be discovered.
         peripheral.setDelegate_(self)
@@ -108,11 +117,11 @@ class CentralDelegate(object):
     def centralManager_didFailToConnectPeripheral_error_(self, manager, peripheral, error):
         # Error connecting to devie.  Ignored for now since connected event will
         # never fire and a timeout will elapse.
-        logger.debug('centralManager_didFailToConnectPeripheral_error called')
+        logger.info('centralManager_didFailToConnectPeripheral_error called')
 
     def centralManager_didDisconnectPeripheral_error_(self, manager, peripheral, error):
         """Called when a device is disconnected."""
-        logger.debug('centralManager_didDisconnectPeripheral called')
+        logger.info('centralManager_didDisconnectPeripheral called')
         # Get the device and remove it from the device list, then fire its
         # disconnected event.
         device = device_list().get(peripheral)
@@ -123,7 +132,7 @@ class CentralDelegate(object):
 
     def peripheral_didDiscoverServices_(self, peripheral, services):
         """Called when services are discovered for a device."""
-        logger.debug('peripheral_didDiscoverServices called')
+        logger.info('peripheral_didDiscoverServices called')
         # Make sure the discovered services are added to the list of known
         # services, and kick off characteristic discovery for each one.
         # NOTE: For some reason the services parameter is never set to a good
@@ -138,7 +147,7 @@ class CentralDelegate(object):
 
     def peripheral_didDiscoverCharacteristicsForService_error_(self, peripheral, service, error):
         """Called when characteristics are discovered for a service."""
-        logger.debug('peripheral_didDiscoverCharacteristicsForService_error called')
+        logger.info('peripheral_didDiscoverCharacteristicsForService_error called')
         # Stop if there was some kind of error.
         if error is not None:
             return
@@ -213,14 +222,32 @@ class CentralDelegate(object):
             device._rssi_changed(rssi)
 
 
+class EventLoopThread(threading.Thread):
+    def __init__(self):
+        super(EventLoopThread, self).__init__()
+        self.setDaemon(True)
+        self.should_stop = False
+
+    def run(self):
+        logger.info('Starting event loop on background thread')
+        AppHelper.runConsoleEventLoop(installInterrupt=True)
+
+    def stop(self):
+        logger.info('Stop the event loop')
+        AppHelper.stopEventLoop()
+
+
 class CoreBluetoothProvider(Provider):
     """BLE provider implementation using the CoreBluetooth framework."""
 
-    def __init__(self):
+    def __init__(self, log_level=logging.DEBUG):
         # Global state for BLE devices and other metadata.
-        self._central_delegate = CentralDelegate()
+
+        self._central_delegate = CentralDelegate(log_level)
         self._central_manager = None
         self._user_thread = None
+        self._dispatch_queue = None
+        self._event_loop_thread = None
         self._adapter = CoreBluetoothAdapter()
         # Keep an internal cache of the devices, services, characteristics, and
         # descriptors that are known to the system.  Extra metadata can be stored
@@ -237,12 +264,12 @@ class CoreBluetoothProvider(Provider):
         """
         # Setup the central manager and its delegate.
         self._central_manager = CBCentralManager.alloc()
+        self._dispatch_queue = libdispatch.dispatch_queue_create(b"mq", None)
         self._central_manager.initWithDelegate_queue_options_(self._central_delegate,
-                                                              None, None)
+                                                              self._dispatch_queue, None)
         # Add any connected devices to list of known devices.
 
-
-    def run_mainloop_with(self, target):
+    def run_mainloop_with(self, target=None):
         """Start the OS's main loop to process asyncronous BLE events and then
         run the specified target function in a background thread.  Target
         function should be a function that takes no parameters and optionally
@@ -262,12 +289,10 @@ class CoreBluetoothProvider(Provider):
                                              args=(target,))
         self._user_thread.daemon = True
         self._user_thread.start()
-        # Run main loop.  This call will never return!
-        try:
-            AppHelper.runConsoleEventLoop(installInterrupt=True)
-        except KeyboardInterrupt:
-            AppHelper.stopEventLoop()
-            sys.exit(0)
+
+        # Run main loop in thread
+        self._event_loop_thread = EventLoopThread()
+        self._event_loop_thread.start()
 
     def _user_thread_main(self, target):
         """Main entry point for the thread that will run user's code."""

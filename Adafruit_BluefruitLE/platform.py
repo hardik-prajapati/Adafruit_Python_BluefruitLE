@@ -22,17 +22,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import sys
+import logging
 
 
 # Keep a single global instance of the BLE provider.
 _provider = None
 
 
-def get_provider():
+def get_provider(log_level=logging.DEBUG):
     """Return an instance of the BLE provider for the current platform."""
     global _provider
     # Set the provider based on the current platform.
     if _provider is None:
+        if log_level not in [logging.DEBUG, logging.INFO]:
+            log_level = logging.DEBUG
+
         if sys.platform.startswith('linux'):
             # Linux platform
             from .bluez_dbus.provider import BluezProvider
@@ -40,7 +44,7 @@ def get_provider():
         elif sys.platform == 'darwin':
             # Mac OSX platform
             from .corebluetooth.provider import CoreBluetoothProvider
-            _provider = CoreBluetoothProvider()
+            _provider = CoreBluetoothProvider(log_level)
         else:
             # Unsupported platform
             raise RuntimeError('Sorry the {0} platform is not supported by the BLE library!'.format(sys.platform))

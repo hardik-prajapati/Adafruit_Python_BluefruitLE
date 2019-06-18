@@ -55,6 +55,7 @@ class CoreBluetoothAdapter(Adapter):
         self._is_scanning = False
         self._powered_on = threading.Event()
         self._powered_off = threading.Event()
+        self._adv_callbabk = None
 
     def _state_changed(self, state):
         """Called when the power state changes."""
@@ -74,10 +75,11 @@ class CoreBluetoothAdapter(Adapter):
         # Mac OSX has no oncept of BLE adapters so just return a fixed value.
         return "Default Adapter"
 
-    def start_scan(self, timeout_sec=TIMEOUT_SEC):
+    def start_scan(self, timeout_sec=TIMEOUT_SEC, callback=None):
         """Start scanning for BLE devices."""
         get_provider()._central_manager.scanForPeripheralsWithServices_options_(None, None)
         self._is_scanning = True
+        self._adv_callbabk = callback
 
     def stop_scan(self, timeout_sec=TIMEOUT_SEC):
         """Stop scanning for BLE devices."""

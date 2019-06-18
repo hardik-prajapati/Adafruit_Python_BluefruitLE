@@ -4,7 +4,7 @@ import platform
 platform_install_requires = []
 
 if platform.system() == 'Darwin':
-    platform_install_requires += ['pyobjc-framework-CoreBluetooth']
+    platform_install_requires += ['pyobjc-framework-CoreBluetooth', 'pyobjc-framework-libdispatch']
 
 # To use a consistent encoding
 from codecs import open
@@ -17,12 +17,12 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(name              = 'Adafruit_BluefruitLE',
-      version           = '0.9.10',
-      author            = 'Tony DiCola',
-      author_email      = 'tdicola@adafruit.com',
+      version           = '0.10.0',
+      author            = 'Hardik Prajapati',
+      author_email      = 'hardik@infocusp.in',
       description       = 'Python library for interacting with Bluefruit LE (Bluetooth low energy) devices on Linux or OSX.',
       long_description  = long_description,
       license           = 'MIT',
-      url               = 'https://github.com/adafruit/Adafruit_Python_BluefruitLE/',
+      url               = 'https://github.com/hardik-prajapati/Adafruit_Python_BluefruitLE/',
       install_requires  = ['future'] + platform_install_requires,
       packages          = find_packages())
