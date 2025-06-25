@@ -50,18 +50,24 @@ class CoreBluetoothDevice(Device):
         self._discovered = threading.Event()
         self._rssi_read = threading.Event()
 
+        # callback to update disconnection
+        self._disconnection_callback = None
+
     @property
     def _central_manager(self):
         # Lookup the CBCentralManager, reduces verbosity of calls.
         return get_provider()._central_manager
 
-    def connect(self, timeout_sec=TIMEOUT_SEC):
+    def connect(self, timeout_sec=TIMEOUT_SEC, disconnection_callback=None):
         """Connect to the device.  If not connected within the specified timeout
         then an exception is thrown.
         """
         self._central_manager.connectPeripheral_options_(self._peripheral, None)
         if not self._connected.wait(timeout_sec):
             raise RuntimeError('Failed to connect to device within timeout period!')
+
+        if disconnection_callback is not None:
+            self._disconnection_callback = disconnection_callback
 
     def disconnect(self, timeout_sec=TIMEOUT_SEC):
         """Disconnect from the device.  If not disconnected within the specified
@@ -90,6 +96,10 @@ class CoreBluetoothDevice(Device):
         """Set the connected event."""
         self._connected.clear()
         self._disconnected.set()
+
+        # update disconnection to callback function
+        if self._disconnection_callback is not None:
+            self._disconnection_callback()
 
     def _update_advertised(self, advertised):
         """Called when advertisement data is received."""
